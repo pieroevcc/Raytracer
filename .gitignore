@@ -13,6 +13,7 @@
 
 # Renders (keep one showcase — see negation below)
 *.ppm
+*.png
 !showcase.ppm
 
 # CUDA/editor cruft

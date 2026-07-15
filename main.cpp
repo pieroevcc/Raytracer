@@ -1,33 +1,20 @@
 #include <iostream>
 #include "vec3.h"
 #include "ray.h"
+#include "hittable.h"
+#include <limits>
 
-float hit_sphere(const Vector3& center, float radius, const Ray& ray){
-    Vector3 oc = ray.origin - center;
-    Vector3 d = ray.direction;
-    float a = dot(d,d);
-    float b = 2 * (dot(d, oc));
-    float c = dot(oc, oc) - (radius*radius);
-    float disc = b*b - 4*a*c;
-
-    return (disc < 0) ? -1.0f : (-b - sqrtf(disc)) / (2*a);
-}
-
-Vector3 ray_color(const Ray& ray){
-    float t = hit_sphere(Vector3(0,0,-1), 0.5f, ray);
-    if (t > 0.0f) {
-        Vector3 P = ray.at(t);
-        Vector3 N = unit(P - Vector3(0.0f,0.0f,-1.0f));
-        return 0.5f * (N + Vector3(1.0f,1.0f,1.0f));
-
+Vector3 ray_color(const Ray& r, const Hittable& world){
+    const float infinity = std::numeric_limits<float>::infinity();
+    hit_record rec;
+    if (world.hit(r, 0.001f, infinity, rec)){
+        return 0.5f * (rec.N + Vector3(1.0f, 1.0f, 1.0f));
     }else{
-        Vector3 unit_direction = unit(ray.direction);
+        Vector3 unit_direction = unit(r.direction);
         float a = 0.5f * (unit_direction.y + 1.0f);
         return (1.0f - a) * Vector3(1.0f,1.0f,1.0f) + a * Vector3(0.5f, 0.7f, 1.0f); 
     }
 }
-
-
 
 int main() {
     const int height = 256;
@@ -46,6 +33,10 @@ int main() {
     
     Ray ray;
 
+    HittableList world;
+    world.add(std::make_shared<Sphere>(Sphere()));
+    
+
     for (int i = 0; i < height; i++){
         for(int j = 0; j < width; j++){
             Vector3 pixel_center = pixel00 + j*pixel_delta_u + i*pixel_delta_v;
@@ -53,13 +44,14 @@ int main() {
 
             ray.origin = camera_center;
             ray.direction = ray_direction;
-
-            Vector3 color = ray_color(ray) * 255.999;
+ 
+            Vector3 color = ray_color(ray, world) * 255.999f;
 
             int x = static_cast<int>(color.x);
             int y = static_cast<int>(color.y);
             int z = static_cast<int>(color.z);
             std::cout << x << " " << y << " " << z << std::endl;
+            
         }
         std::cout << '\n' << std::endl;
     }
