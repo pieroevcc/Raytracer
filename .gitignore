@@ -1,0 +1,20 @@
+# Build artifacts
+*.exe
+*.obj
+*.o
+*.exp
+*.lib
+*.pdb
+*.ilk
+
+# random files
+*.md
+!README.md
+
+# Renders (keep one showcase — see negation below)
+*.ppm
+!showcase.ppm
+
+# CUDA/editor cruft
+*.ptx
+.vs/
