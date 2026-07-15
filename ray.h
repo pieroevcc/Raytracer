@@ -14,7 +14,7 @@ class Ray {
         this->direction = direction;
     }
 
-    Vector3 at(double t) const{
+    Vector3 at(float t) const{
         return origin + t * direction;
     }
 };
