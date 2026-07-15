@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <cmath>
+#include <cstdlib>
 
 class Vector3 {
 public:
@@ -70,4 +71,27 @@ inline Vector3 unit(const Vector3& v) {
     return v / std::sqrt(dot(v, v));
 }
 
+inline float rand_float(){
+    return rand() / (RAND_MAX + 1.0f);
+}
+
+inline float random_float(float min, float max){
+    return min + (max - min) * rand_float();
+}
+
+inline Vector3 random_vector(float min , float max){
+    return Vector3(random_float(min, max), random_float(min, max), random_float(min, max));
+}
+
+inline Vector3 random_unit_vector(){
+    while(true){
+        Vector3 p = random_vector(-1.0f, 1.0f);
+        float lensq = dot(p,p);
+        if (1e-30f < lensq && lensq <= 1.0f) return p /sqrtf(lensq);
+    }
+}
+
+inline bool near_zero(const Vector3& v){
+    return v.x < 1e-8 && v.y < 1e-8 && v.z < 1e-8;
+}
 #endif

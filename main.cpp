@@ -3,15 +3,17 @@
 #include "ray.h"
 #include "hittable.h"
 #include <limits>
-#include <cstdlib>
 #include <algorithm>
 
 const float infinity = std::numeric_limits<float>::infinity();
 
-Vector3 ray_color(const Ray& r, const Hittable& world){
+Vector3 ray_color(const Ray& r, const Hittable& world, int depth){
+    if (depth <= 0) return Vector3(0,0,0);
     hit_record rec;
     if (world.hit(r, 0.001f, infinity, rec)){
-        return 0.5f * (rec.N + Vector3(1.0f, 1.0f, 1.0f));
+        Vector3 direction = rec.N + random_unit_vector();
+        if (near_zero(direction)) direction = rec.N;
+        return 0.5f * ray_color(Ray(rec.p, direction), world, depth - 1);
     }else{
         Vector3 unit_direction = unit(r.direction);
         float a = 0.5f * (unit_direction.y + 1.0f);
@@ -19,14 +21,10 @@ Vector3 ray_color(const Ray& r, const Hittable& world){
     }
 }
 
-float rand_float(){
-    return rand() / (RAND_MAX + 1.0f);
-}
-
 std::ostream& write_color(std::ostream& str, Vector3 color){
-    int x = static_cast<int>(256 * std::clamp(color.x, 0.0f, 0.999f));
-    int y = static_cast<int>(256 * std::clamp(color.y, 0.0f, 0.999f));
-    int z = static_cast<int>(256 * std::clamp(color.z, 0.0f, 0.999f));
+    int x = static_cast<int>(256 * std::clamp(std::sqrt(color.x), 0.0f, 0.999f));
+    int y = static_cast<int>(256 * std::clamp(std::sqrt(color.y), 0.0f, 0.999f));
+    int z = static_cast<int>(256 * std::clamp(std::sqrt(color.z), 0.0f, 0.999f));
     str << x << " " << y << " " << z;
     return str;
 }
@@ -52,6 +50,7 @@ int main() {
 
     const int samples_per_pixel = 100;
     const float pixel_samples_scale = 1.0f / samples_per_pixel;
+    const int max_depth = 50;
    
 
     for (int i = 0; i < height; i++){
@@ -62,7 +61,7 @@ int main() {
                 float oy = rand_float() - 0.5f;
                 Vector3 sample = pixel00 + (j + ox) * pixel_delta_u + (i + oy) * pixel_delta_v;
                 Ray r(camera_center, sample - camera_center);
-                pixel_color = pixel_color + ray_color(r,world);
+                pixel_color = pixel_color + ray_color(r,world, max_depth);
             }
             pixel_color = pixel_color * pixel_samples_scale;
             write_color(std::cout, pixel_color) << '\n';
