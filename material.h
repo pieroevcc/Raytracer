@@ -34,18 +34,21 @@ class Lambertian : public Material {
 class Metal : public Material{
     public:
         Vector3 albedo;
+        float fuzz;
 
         Metal(){}
 
-        Metal(const Vector3& albedo){
+        Metal(const Vector3& albedo, float fuzz){
             this->albedo = albedo;
+            this->fuzz = (fuzz < 1.0f) ? fuzz : 1.0f;
         }
 
         bool scatter(const Ray& r_in, const hit_record& rec, Vector3& attenuation, Ray& scattered) const override{
             Vector3 reflected = reflect(unit(r_in.direction), rec.N);
+            reflected = unit(reflected) + fuzz * random_unit_vector();
             scattered = Ray(rec.p, reflected);
             attenuation = albedo;
-            return true;
+            return (dot(scattered.direction, rec.N) > 0);
         }
 
 };
