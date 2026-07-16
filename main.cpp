@@ -40,13 +40,36 @@ int main() {
     std::cout << "P3" << std::endl;
     std::cout << width << " " <<  height << std::endl;
     std::cout << size << std::endl;
-    
-    Vector3 camera_center = Vector3(0.0f,0.0f,0.0f);
-    Vector3 viewport_u = Vector3(2.0f,0.0f,0.0f);
-    Vector3 viewport_v = Vector3(0.0f,-2.0f,0.0f);
-    Vector3 pixel_delta_u = viewport_u/256.0f;
-    Vector3 pixel_delta_v = viewport_v/256.0f;
-    Vector3 pixel00 = 0.5f * (pixel_delta_u + pixel_delta_v) +  camera_center - Vector3(0.0f,0.0f,1.0f) - viewport_u/2 - viewport_v/2;
+
+    Vector3 lookfrom = Vector3(-2.0f, 2.0f,  1.0f);   
+    Vector3 lookat   = Vector3(0.0f, 0.0f, -1.0f); 
+    Vector3 vup      = Vector3(0.0f, 1.0f,  0.0f);  
+
+    Vector3 camera_center = lookfrom;
+    Vector3 w = unit(lookfrom - lookat);   
+    Vector3 u = unit(cross(vup, w));     
+    Vector3 v = cross(w, u);    
+
+    float defocus_angle = 10.0f;
+    float focus_dist = 3.4f; 
+
+    float defocus_radius = focus_dist * tanf(degrees_to_radians(defocus_angle / 2.0f));
+    Vector3 defocus_disk_u = u * defocus_radius;   
+    Vector3 defocus_disk_v = v * defocus_radius;   
+
+    float vfov = 30.0f;
+    float theta = degrees_to_radians(vfov);
+    float h = tanf(theta / 2.0f);
+    float viewport_height = 2.0f * h * focus_dist;
+    float viewport_width  = viewport_height * (float(width) / height);
+
+ 
+    Vector3 viewport_u = viewport_width * u;
+    Vector3 viewport_v = viewport_height * neg(v);
+    Vector3 pixel_delta_u = viewport_u/ float(width);
+    Vector3 pixel_delta_v = viewport_v/ float(height);
+    Vector3 viewport_upper_left = camera_center - focus_dist * w - viewport_u / 2.0f - viewport_v / 2.0f;
+    Vector3 pixel00 = 0.5f * (pixel_delta_u + pixel_delta_v) +  viewport_upper_left;
     
 
     HittableList world;
@@ -71,10 +94,12 @@ int main() {
         for(int j = 0; j < width; j++){
             Vector3 pixel_color(0,0,0);
             for (int s = 0; s < samples_per_pixel; s++){
+                Vector3 p = random_in_unit_disk();
+                Vector3 ray_origin = camera_center + p.x * defocus_disk_u + p.y * defocus_disk_v;  
                 float ox = rand_float() - 0.5f;
                 float oy = rand_float() - 0.5f;
                 Vector3 sample = pixel00 + (j + ox) * pixel_delta_u + (i + oy) * pixel_delta_v;
-                Ray r(camera_center, sample - camera_center);
+                Ray r(ray_origin, sample - ray_origin); 
                 pixel_color = pixel_color + ray_color(r,world, max_depth);
             }
             pixel_color = pixel_color * pixel_samples_scale;

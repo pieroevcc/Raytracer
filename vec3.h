@@ -109,4 +109,20 @@ inline Vector3 refract(const Vector3& uv, const Vector3& n, float etai_over_etat
     return r_out_parallel + r_out_perp;
 }
 
+inline Vector3 cross(const Vector3& a, const Vector3& b) {
+    return Vector3(a.y*b.z - a.z*b.y,
+                   a.z*b.x - a.x*b.z,
+                   a.x*b.y - a.y*b.x);
+}
+
+const float pi = 3.1415926535f;
+inline float degrees_to_radians(float deg) { return deg * pi / 180.0f; }
+
+inline Vector3 random_in_unit_disk() {
+    while (true) {
+        Vector3 p = Vector3(random_float(-1.0f, 1.0f), random_float(-1.0f, 1.0f), 0.0f);
+        if (dot(p, p) < 1.0f) return p;
+    }
+}
+
 #endif

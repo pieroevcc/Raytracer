@@ -67,7 +67,7 @@ class Dielectric : public Material {
             float cos_theta = fminf(dot(neg(unit_dir), rec.N), 1.0f);
             float sin_theta = sqrtf(1.0f - cos_theta * cos_theta);
     
-            bool cannot_refract = ri * sin_theta > 1.0f;   // Snell has no solution → must reflect
+            bool cannot_refract = ri * sin_theta > 1.0f; 
             Vector3 direction;
             if (cannot_refract || reflectance(cos_theta, ri) > rand_float())
                 direction = reflect(unit_dir, rec.N);
