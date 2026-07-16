@@ -92,6 +92,11 @@ inline Vector3 random_unit_vector(){
 }
 
 inline bool near_zero(const Vector3& v){
-    return v.x < 1e-8 && v.y < 1e-8 && v.z < 1e-8;
+    return fabsf(v.x) < 1e-8f && fabsf(v.y) < 1e-8f && fabsf(v.z) < 1e-8f;
 }
+
+inline Vector3 reflect(const Vector3& v, const Vector3& n){
+    return v - 2.0f * dot(v, n) * n;
+}
+
 #endif

@@ -6,9 +6,12 @@
 #include <vector>
 #include <memory>
 
+class Material;
+
 struct hit_record{
     Vector3 p, N;
     float t;
+    std::shared_ptr<Material> mat;
 };
 
 
@@ -22,15 +25,12 @@ class Sphere : public Hittable {
     public:
         Vector3 center;
         float radius;
+        std::shared_ptr<Material> mat;
 
-        Sphere(){
-            center = Vector3(0,0,-1);
-            radius = 0.5f;
-        };
-        Sphere(Vector3 center, float radius) {
+        Sphere(const Vector3& center, float radius, const std::shared_ptr<Material>& mat) {
             this->center = center;
             this->radius = radius;
-
+            this->mat = mat;
         }
 
         bool hit(const Ray& r, float t_min, float t_max, hit_record& rec) const override {
@@ -54,6 +54,7 @@ class Sphere : public Hittable {
             rec.t = root;
             rec.p = r.at(root);
             rec.N = (rec.p - center) / radius;
+            rec.mat = mat;
             return true;
         }
 };
