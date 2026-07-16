@@ -7,14 +7,14 @@ class Ray {
     public:
         Vector3 origin, direction;
 
-    Ray(){}
+    HD Ray(){}
 
-    Ray (const Vector3& origin, const Vector3& direction){
+    HD Ray (const Vector3& origin, const Vector3& direction){
         this->origin = origin;
         this->direction = direction;
     }
 
-    Vector3 at(float t) const{
+    HD Vector3 at(float t) const{
         return origin + t * direction;
     }
 };
