@@ -10,9 +10,17 @@ class Material;
 
 struct hit_record{
     Vector3 p, N;
-    float t;
     std::shared_ptr<Material> mat;
+    float t;
+    bool front_face;
+
+    void set_face_normal(const Ray& r, const Vector3& outward_normal){
+        front_face = dot(r.direction, outward_normal) < 0.0f;
+        N = front_face ? outward_normal : neg(outward_normal);
+    }
 };
+
+
 
 
 class Hittable {
@@ -53,7 +61,8 @@ class Sphere : public Hittable {
             }
             rec.t = root;
             rec.p = r.at(root);
-            rec.N = (rec.p - center) / radius;
+            Vector3 outward_normal = (rec.p - center) / radius;
+            rec.set_face_normal(r, outward_normal);
             rec.mat = mat;
             return true;
         }

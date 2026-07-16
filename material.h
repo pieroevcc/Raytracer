@@ -53,4 +53,37 @@ class Metal : public Material{
 
 };
 
+class Dielectric : public Material {
+    public:
+        float refraction_index;
+        Dielectric(float ri) : refraction_index(ri) {}
+    
+        bool scatter(const Ray& r_in, const hit_record& rec,
+                     Vector3& attenuation, Ray& scattered) const override {
+            attenuation = Vector3(1.0f, 1.0f, 1.0f);
+            float ri = rec.front_face ? (1.0f / refraction_index) : refraction_index;
+    
+            Vector3 unit_dir = unit(r_in.direction);
+            float cos_theta = fminf(dot(neg(unit_dir), rec.N), 1.0f);
+            float sin_theta = sqrtf(1.0f - cos_theta * cos_theta);
+    
+            bool cannot_refract = ri * sin_theta > 1.0f;   // Snell has no solution → must reflect
+            Vector3 direction;
+            if (cannot_refract || reflectance(cos_theta, ri) > rand_float())
+                direction = reflect(unit_dir, rec.N);
+            else
+                direction = refract(unit_dir, rec.N, ri);
+    
+            scattered = Ray(rec.p, direction);
+            return true;
+        }
+    
+    private:
+        static float reflectance(float cosine, float ri) {
+            float r0 = (1.0f - ri) / (1.0f + ri);
+            r0 = r0 * r0;
+            return r0 + (1.0f - r0) * powf(1.0f - cosine, 5.0f);
+        }
+};
+
 #endif

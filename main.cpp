@@ -54,7 +54,7 @@ int main() {
 
     auto ground = std::make_shared<Lambertian>(Vector3(0.8f, 0.8f, 0.0f));
     auto center = std::make_shared<Lambertian>(Vector3(0.1f, 0.2f, 0.5f));
-    auto left   = std::make_shared<Metal>(Vector3(0.8f, 0.8f, 0.8f), 0.3f);
+    auto left = std::make_shared<Dielectric>(1.5f);
     auto right  = std::make_shared<Metal>(Vector3(0.8f, 0.6f, 0.2f), 1.0f);
     
     world.add(std::make_shared<Sphere>(Vector3( 0.0f, -100.5f, -1.0f), 100.0f, ground));

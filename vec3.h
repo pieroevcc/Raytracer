@@ -63,6 +63,9 @@ inline Vector3 neg(const Vector3& v) {
     return Vector3(-v.x, -v.y, -v.z);
 }
 
+inline Vector3 operator-(const Vector3& v){ return neg(v); }
+
+
 inline float dot(const Vector3& v1, const Vector3& v2) {
     return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
 }
@@ -97,6 +100,13 @@ inline bool near_zero(const Vector3& v){
 
 inline Vector3 reflect(const Vector3& v, const Vector3& n){
     return v - 2.0f * dot(v, n) * n;
+}
+
+inline Vector3 refract(const Vector3& uv, const Vector3& n, float etai_over_etat) {
+    float cos_theta = fminf(dot(-uv, n), 1.0f);
+    Vector3 r_out_perp = etai_over_etat * (uv + cos_theta * n);
+    Vector3 r_out_parallel = -sqrtf(fabsf(1.0f - dot(r_out_perp, r_out_perp))) * n;
+    return r_out_parallel + r_out_perp;
 }
 
 #endif
