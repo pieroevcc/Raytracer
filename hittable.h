@@ -45,9 +45,9 @@ class Sphere : public Hittable {
             //solving for t
             Vector3 oc = r.origin - center;
             Vector3 d = r.direction;
-            float a = dot(d,d);
+            float a = length_squared(d);
             float b = 2 * (dot(d, oc));
-            float c = dot(oc, oc) - (radius*radius);
+            float c = length_squared(oc) - (radius*radius);
             float disc = b*b - 4.0f*a*c;
             if (disc < 0) return false;
             float sqrtd = sqrtf(disc);

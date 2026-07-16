@@ -70,8 +70,12 @@ inline float dot(const Vector3& v1, const Vector3& v2) {
     return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
 }
 
+inline float length_squared(const Vector3& v){ return dot(v,v);};
+
+inline float length(const Vector3& v){ return sqrtf(length_squared(v));}
+
 inline Vector3 unit(const Vector3& v) {
-    return v / std::sqrt(dot(v, v));
+    return v / length(v);
 }
 
 inline float rand_float(){
@@ -89,7 +93,7 @@ inline Vector3 random_vector(float min , float max){
 inline Vector3 random_unit_vector(){
     while(true){
         Vector3 p = random_vector(-1.0f, 1.0f);
-        float lensq = dot(p,p);
+        float lensq = length_squared(p);
         if (1e-30f < lensq && lensq <= 1.0f) return p /sqrtf(lensq);
     }
 }
@@ -105,7 +109,7 @@ inline Vector3 reflect(const Vector3& v, const Vector3& n){
 inline Vector3 refract(const Vector3& uv, const Vector3& n, float etai_over_etat) {
     float cos_theta = fminf(dot(-uv, n), 1.0f);
     Vector3 r_out_perp = etai_over_etat * (uv + cos_theta * n);
-    Vector3 r_out_parallel = -sqrtf(fabsf(1.0f - dot(r_out_perp, r_out_perp))) * n;
+    Vector3 r_out_parallel = -sqrtf(fabsf(1.0f - length_squared(r_out_perp))) * n;
     return r_out_parallel + r_out_perp;
 }
 
@@ -121,7 +125,7 @@ inline float degrees_to_radians(float deg) { return deg * pi / 180.0f; }
 inline Vector3 random_in_unit_disk() {
     while (true) {
         Vector3 p = Vector3(random_float(-1.0f, 1.0f), random_float(-1.0f, 1.0f), 0.0f);
-        if (dot(p, p) < 1.0f) return p;
+        if (length(p) < 1.0f) return p;
     }
 }
 
