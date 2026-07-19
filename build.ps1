@@ -17,6 +17,12 @@ cmd /c "`"$vcvars`" 2>nul && set" | ForEach-Object {
     if ($_ -match '^(.*?)=(.*)$') { Set-Item -Path "env:$($matches[1])" -Value $matches[2] }
 }
 
+# nvcc lives under CUDA_PATH\bin; the session may predate the installer's env change,
+# so fall back to the machine-level value
+$cudaPath = $env:CUDA_PATH
+if (-not $cudaPath) { $cudaPath = [Environment]::GetEnvironmentVariable('CUDA_PATH','Machine') }
+if ($cudaPath) { $env:PATH = "$cudaPath\bin;$env:PATH" }
+
 # --- CPU build ---
 Write-Host "==> Building CPU raytracer (raytracer.exe)" -ForegroundColor Cyan
 cl /nologo /O2 /EHsc /std:c++17 /Fe:raytracer.exe main.cpp
@@ -26,7 +32,9 @@ Remove-Item *.obj -ErrorAction SilentlyContinue
 # --- CUDA build (only if the port exists yet) ---
 if (Test-Path "main.cu") {
     Write-Host "==> Building CUDA raytracer (raytracer_cuda.exe)" -ForegroundColor Cyan
-    nvcc -O3 -o raytracer_cuda.exe main.cu
+    # -arch=sm_89: emit native code for the RTX 4060 (Ada) instead of PTX,
+    # so the (older) driver never has to JIT-compile it
+    nvcc -O3 -arch=sm_89 -o raytracer_cuda.exe main.cu
     if ($LASTEXITCODE -ne 0) { throw "CUDA build failed" }
 }
 
