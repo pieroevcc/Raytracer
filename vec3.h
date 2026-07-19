@@ -1,9 +1,3 @@
-#if defined(__CUDACC__)
-#define HD __host__ __device__
-#else
-#define HD
-#endif
-
 #ifndef VEC3_H
 #define VEC3_H
 
@@ -16,14 +10,14 @@ public:
     float x, y, z;
 
     // Default Constructor
-    HD Vector3() {
+    Vector3() {
         x = 0;
         y = 0;
         z = 0;
     }
 
     // Parameterized Constructor
-    HD Vector3(float x, float y, float z) {
+    Vector3(float x, float y, float z) {
         this->x = x;
         this->y = y;
         this->z = z;
@@ -36,55 +30,61 @@ public:
 }; 
 
 
-HD inline Vector3 operator+(const Vector3& v1, const Vector3& v2) {
+inline Vector3 operator+(const Vector3& v1, const Vector3& v2) {
     return Vector3(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z);
 }
 
-HD inline Vector3 operator-(const Vector3& v1, const Vector3& v2) {
+inline Vector3 operator-(const Vector3& v1, const Vector3& v2) {
     return Vector3(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z);
 }
 
-HD inline Vector3 operator*(const Vector3& v1, const Vector3& v2) {
+inline Vector3 operator*(const Vector3& v1, const Vector3& v2) {
     return Vector3(v1.x * v2.x, v1.y * v2.y, v1.z * v2.z);
 }
 
-HD inline Vector3 operator*(const Vector3& v, float scalar) {
+inline Vector3 operator*(const Vector3& v, float scalar) {
     return Vector3(v.x * scalar, v.y * scalar, v.z * scalar);
 }
 
 // Allows scalar * vector order multiplication (e.g., 2.5 * velocity)
-HD inline Vector3 operator*(float scalar, const Vector3& v) {
+inline Vector3 operator*(float scalar, const Vector3& v) {
     return Vector3(v.x * scalar, v.y * scalar, v.z * scalar);
 }
 
-HD inline Vector3 operator/(const Vector3& v1, const Vector3& v2) {
+inline Vector3 operator/(const Vector3& v1, const Vector3& v2) {
     return Vector3(v1.x / v2.x, v1.y / v2.y, v1.z / v2.z);
 }
 
-HD inline Vector3 operator/(const Vector3& v1, float scalar) {
+inline Vector3 operator/(const Vector3& v1, float scalar) {
     return Vector3(v1.x / scalar, v1.y / scalar, v1.z / scalar);
 }
 
-HD inline Vector3 neg(const Vector3& v) {
+inline Vector3 neg(const Vector3& v) {
     return Vector3(-v.x, -v.y, -v.z);
 }
 
-HD inline Vector3 operator-(const Vector3& v){ return neg(v); }
+inline Vector3 operator-(const Vector3& v){ return neg(v); }
 
 
-HD inline float dot(const Vector3& v1, const Vector3& v2) {
+inline float dot(const Vector3& v1, const Vector3& v2) {
     return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
 }
 
-HD inline float length_squared(const Vector3& v){ return dot(v,v);};
+inline float length_squared(const Vector3& v){ return dot(v,v);};
 
-HD inline float length(const Vector3& v){ return sqrtf(length_squared(v));}
+inline float length(const Vector3& v){ return sqrtf(length_squared(v));}
 
-HD inline Vector3 unit(const Vector3& v) {return v / length(v); }
+inline Vector3 unit(const Vector3& v) {
+    return v / length(v);
+}
 
-inline float rand_float(){ return rand() / (RAND_MAX + 1.0f); }
+inline float rand_float(){
+    return rand() / (RAND_MAX + 1.0f);
+}
 
-inline float random_float(float min, float max){ return min + (max - min) * rand_float(); }
+inline float random_float(float min, float max){
+    return min + (max - min) * rand_float();
+}
 
 inline Vector3 random_vector(float min , float max){
     return Vector3(random_float(min, max), random_float(min, max), random_float(min, max));
@@ -98,29 +98,29 @@ inline Vector3 random_unit_vector(){
     }
 }
 
-HD inline bool near_zero(const Vector3& v){
+inline bool near_zero(const Vector3& v){
     return fabsf(v.x) < 1e-8f && fabsf(v.y) < 1e-8f && fabsf(v.z) < 1e-8f;
 }
 
-HD inline Vector3 reflect(const Vector3& v, const Vector3& n){
+inline Vector3 reflect(const Vector3& v, const Vector3& n){
     return v - 2.0f * dot(v, n) * n;
 }
 
-HD inline Vector3 refract(const Vector3& uv, const Vector3& n, float etai_over_etat) {
+inline Vector3 refract(const Vector3& uv, const Vector3& n, float etai_over_etat) {
     float cos_theta = fminf(dot(-uv, n), 1.0f);
     Vector3 r_out_perp = etai_over_etat * (uv + cos_theta * n);
     Vector3 r_out_parallel = -sqrtf(fabsf(1.0f - length_squared(r_out_perp))) * n;
     return r_out_parallel + r_out_perp;
 }
 
-HD inline Vector3 cross(const Vector3& a, const Vector3& b) {
+inline Vector3 cross(const Vector3& a, const Vector3& b) {
     return Vector3(a.y*b.z - a.z*b.y,
                    a.z*b.x - a.x*b.z,
                    a.x*b.y - a.y*b.x);
 }
 
 const float pi = 3.1415926535f;
-HD inline float degrees_to_radians(float deg) { return deg * pi / 180.0f; }
+inline float degrees_to_radians(float deg) { return deg * pi / 180.0f; }
 
 inline Vector3 random_in_unit_disk() {
     while (true) {
