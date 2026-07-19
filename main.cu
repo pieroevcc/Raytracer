@@ -47,12 +47,22 @@ __device__ bool hit_world(const Sphere* world, int n, const Ray& r, float t_min,
     return hit_anything;
 
 }
-
-__global__ void render (float* fb, Sphere* world, int n, int width, int height){
+__global__ void render_init(curandState* rand_state, int width, int height) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
     if (i >= width || j >= height) return;
+    curand_init(1984, j*width + i, 0, &rand_state[j*width+i]);
+}
+
+__global__ void render (float* fb, const Sphere* world, int n, int width, int height, curandState* rand_state){
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    int j = threadIdx.y + blockIdx.y * blockDim.y;
+    if (i >= width || j >= height) return;
+    int pixel_index = j*width + i;
+    curandState local_rand = rand_state[pixel_index];
+
     float vfov = 20.0f;
+    int samples_per_pixel = 100;
     Vector3 lookfrom = Vector3(13,2,3), lookat = Vector3(0,0,0), vup = Vector3(0,1,0);
     float defocus_angle = 0.6f, focus_dist = 10.0f;
     Vector3 center, pixel00_loc, pixel_delta_u, pixel_delta_v;
@@ -80,21 +90,28 @@ __global__ void render (float* fb, Sphere* world, int n, int width, int height){
     pixel00_loc = 0.5f * (pixel_delta_u + pixel_delta_v) +  viewport_upper_left;
 
     Vector3 pixel_color;
-    Vector3 sample = pixel00_loc + i * pixel_delta_u + j * pixel_delta_v;
-    Ray r = Ray(center, sample - center);
+    for (int s = 0; s < samples_per_pixel; s++){
+        Vector3 sample_color;
+        float ox = curand_uniform(&local_rand) - 0.5f;
+        float oy = curand_uniform(&local_rand) - 0.5f;
+        Vector3 sample = pixel00_loc + (i + ox) * pixel_delta_u + (j + oy ) * pixel_delta_v;
+        Ray r = Ray(center, sample - center);
 
-    HitRecord rec;
-    if (hit_world(world, n , r , 0.001f, 1e30f, rec)){
-        //sphere
-        pixel_color = 0.5f * (rec.normal + Vector3(1,1,1));
+        HitRecord rec;
+        if (hit_world(world, n , r , 0.001f, 1e30f, rec)){
+            //sphere
+            sample_color = 0.5f * (rec.normal + Vector3(1,1,1));
+        }
+        else{
+            //sky
+            Vector3 unit_direction = unit(r.direction);
+            float a = 0.5f * (unit_direction.y + 1.0f);
+            sample_color = (1.0f - a) * Vector3(1.0f,1.0f,1.0f) + a * Vector3(0.5f, 0.7f, 1.0f);
+        } 
+        pixel_color = pixel_color + sample_color;
+
     }
-    else{
-        //sky
-        Vector3 unit_direction = unit(r.direction);
-        float a = 0.5f * (unit_direction.y + 1.0f);
-        pixel_color = (1.0f - a) * Vector3(1.0f,1.0f,1.0f) + a * Vector3(0.5f, 0.7f, 1.0f);
-    } 
-
+    pixel_color = pixel_color * 1.0f/samples_per_pixel;
     int idx = 3 * (j * width + i);
     fb[idx] = pixel_color.x;
     fb[idx+1] = pixel_color.y;
@@ -110,7 +127,9 @@ int main(){
     int height = 225;
     int n = 4;
     Sphere* world;
+    curandState* rand_state;
 
+    cudaMallocManaged((void **)&rand_state, width * height * sizeof(curandState));
     cudaMallocManaged(&world, n * sizeof(Sphere));
     cudaMallocManaged(&fb, 3*width*height*sizeof(float));
 
@@ -123,7 +142,8 @@ int main(){
     dim3 blocks(width/8+1, height/8+1);
     dim3 threads(8,8);
 
-    render<<<blocks,threads>>>(fb, world, n,  width, height);
+    render_init<<<blocks, threads>>>(rand_state, width, height);
+    render<<<blocks,threads>>>(fb, world, n, width, height, rand_state);
     cudaDeviceSynchronize();
 
     cudaError_t err = cudaGetLastError();
@@ -144,6 +164,7 @@ int main(){
 
     cudaFree(fb);
     cudaFree(world);
+    cudaFree(rand_state);
 
     return 0;
 }
