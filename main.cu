@@ -6,8 +6,83 @@
 #include "vec3.h"
 #include "ray.h"
 
-struct Sphere { Vector3 center; float radius; };
-struct HitRecord { Vector3 p; Vector3 normal; float t; bool front_face; };
+enum MatType { LAMBERTIAN, METAL, DIELECTRIC };
+struct Material { MatType type; Vector3 albedo; float fuzz; float ior; };
+
+struct Sphere { Vector3 center; float radius; Material mat; };
+struct HitRecord { Vector3 p; Vector3 normal; float t; bool front_face; Material mat; };
+
+__device__ Vector3 random_unit_vector(curandState* rs){
+    while(true){
+        float rand = 2.0f*curand_uniform(rs) - 1.0f;
+        Vector3 p = Vector3(rand, rand, rand);
+        float lensq = length_squared(p);
+        if (1e-30f < lensq && lensq <= 1.0f) return p /sqrtf(lensq);
+    }
+}
+
+__device__ Vector3 random_in_unit_disk(curandState* rs) {
+    while (true) {
+        float rand = 2.0f*curand_uniform(rs) - 1.0f;
+        Vector3 p = Vector3(rand, rand, 0.0f);
+        if (length(p) < 1.0f) return p;
+    }
+}
+
+__device__ Vector3 random_vector(curandState* rs){
+    return Vector3(curand_uniform(rs), curand_uniform(rs), curand_uniform(rs));
+}
+
+__device__ bool scatter(const Material& m, const Ray& r_in, const HitRecord& rec,
+    Vector3& attenuation, Ray& scattered, curandState* rs){
+        bool res = false;
+        switch(m.type){
+            case (LAMBERTIAN) : {
+                Vector3 dir = rec.normal + random_unit_vector(rs);
+                if(near_zero(dir)) dir = rec.normal;
+                scattered = Ray(rec.p, dir);
+                attenuation = m.albedo;
+                res = true;
+                break;
+            }
+
+            case (METAL): {
+                Vector3 reflected = reflect(unit(r_in.direction), rec.normal);
+                reflected = unit(reflected) + m.fuzz * random_unit_vector(rs);
+                scattered = Ray(rec.p, reflected);
+                attenuation = m.albedo;
+                res = (dot(scattered.direction, rec.normal) > 0);
+                break;
+            }
+
+            case (DIELECTRIC): {
+                attenuation = Vector3(1.0f, 1.0f, 1.0f);
+                float ri = rec.front_face ? (1.0f / m.ior) : m.ior;
+        
+                Vector3 unit_dir = unit(r_in.direction);
+                float cos_theta = fminf(dot(neg(unit_dir), rec.normal), 1.0f);
+                float sin_theta = sqrtf(1.0f - cos_theta * cos_theta);
+        
+                bool cannot_refract = ri * sin_theta > 1.0f; 
+                Vector3 direction;
+                float r0 = (1.0f - ri) / (1.0f + ri);
+                r0 = r0 * r0;
+                float reflectance = r0 + (1.0f - r0) * powf(1.0f - cos_theta, 5.0f);
+                if (cannot_refract || reflectance > curand_uniform(rs))
+                    direction = reflect(unit_dir, rec.normal);
+                else
+                    direction = refract(unit_dir, rec.normal, ri);
+        
+                scattered = Ray(rec.p, direction);
+                res = true;
+                break;
+            }   
+            default:
+                return res;       
+        }
+        return res;
+    }
+
 
 __device__ bool hit_sphere(const Sphere& s, const Ray& r, float t_min, float t_max, HitRecord& rec) {
     Vector3 oc = s.center - r.origin;
@@ -29,6 +104,7 @@ __device__ bool hit_sphere(const Sphere& s, const Ray& r, float t_min, float t_m
     Vector3 outward = (rec.p - s.center) / s.radius;
     rec.front_face = dot(r.direction, outward) < 0.0f;
     rec.normal = rec.front_face ? outward : -outward;
+    rec.mat = s.mat;
     return true;
 }
 
@@ -47,6 +123,27 @@ __device__ bool hit_world(const Sphere* world, int n, const Ray& r, float t_min,
     return hit_anything;
 
 }
+
+__device__ Vector3 ray_color(Ray r, const Sphere* world, int n, curandState* rs){
+    Vector3 throughput = Vector3(1,1,1);
+    for (int depth = 0; depth < 50; depth++){
+        HitRecord rec;
+        if (hit_world(world, n, r, 0.001f, 1e30f, rec)){
+            Vector3 attenuation; Ray scattered; 
+            if (scatter(rec.mat, r, rec, attenuation, scattered, rs)){
+                throughput = throughput * attenuation;
+                r = scattered;          
+            } else return Vector3(0,0,0);  
+        } else {
+            Vector3 unit_direction = unit(r.direction);
+            float a = 0.5f * (unit_direction.y + 1.0f);
+            Vector3 sky = (1.0f - a) * Vector3(1.0f,1.0f,1.0f) + a * Vector3(0.5f, 0.7f, 1.0f); 
+            return throughput * sky;
+        }
+    }
+    return Vector3(0,0,0);             
+}
+
 __global__ void render_init(curandState* rand_state, int width, int height) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
@@ -54,12 +151,12 @@ __global__ void render_init(curandState* rand_state, int width, int height) {
     curand_init(1984, j*width + i, 0, &rand_state[j*width+i]);
 }
 
-__global__ void render (float* fb, const Sphere* world, int n, int width, int height, curandState* rand_state){
+__global__ void render (float* fb, const Sphere* world, int n, int width, int height, curandState* rs){
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
     if (i >= width || j >= height) return;
     int pixel_index = j*width + i;
-    curandState local_rand = rand_state[pixel_index];
+    curandState local_rand = rs[pixel_index];
 
     float vfov = 20.0f;
     int samples_per_pixel = 100;
@@ -91,31 +188,55 @@ __global__ void render (float* fb, const Sphere* world, int n, int width, int he
 
     Vector3 pixel_color;
     for (int s = 0; s < samples_per_pixel; s++){
-        Vector3 sample_color;
+        Vector3 p = random_in_unit_disk(&local_rand);
+        Vector3 ray_origin = center + p.x * defocus_disk_u + p.y * defocus_disk_v;
         float ox = curand_uniform(&local_rand) - 0.5f;
         float oy = curand_uniform(&local_rand) - 0.5f;
-        Vector3 sample = pixel00_loc + (i + ox) * pixel_delta_u + (j + oy ) * pixel_delta_v;
-        Ray r = Ray(center, sample - center);
-
-        HitRecord rec;
-        if (hit_world(world, n , r , 0.001f, 1e30f, rec)){
-            //sphere
-            sample_color = 0.5f * (rec.normal + Vector3(1,1,1));
-        }
-        else{
-            //sky
-            Vector3 unit_direction = unit(r.direction);
-            float a = 0.5f * (unit_direction.y + 1.0f);
-            sample_color = (1.0f - a) * Vector3(1.0f,1.0f,1.0f) + a * Vector3(0.5f, 0.7f, 1.0f);
-        } 
-        pixel_color = pixel_color + sample_color;
-
+        Vector3 sample = pixel00_loc + (i + ox) * pixel_delta_u + (j + oy) * pixel_delta_v;
+        Ray r = Ray(ray_origin, sample - ray_origin);
+        pixel_color = pixel_color + ray_color(r, world, n , &local_rand);;
     }
+    rs[pixel_index] = local_rand;
     pixel_color = pixel_color * 1.0f/samples_per_pixel;
     int idx = 3 * (j * width + i);
-    fb[idx] = pixel_color.x;
-    fb[idx+1] = pixel_color.y;
-    fb[idx+2] = pixel_color.z;
+    fb[idx] = sqrtf(pixel_color.x);
+    fb[idx+1] = sqrtf(pixel_color.y);
+    fb[idx+2] = sqrtf(pixel_color.z);
+
+}
+__global__ void scene(Sphere* world, int* actual, curandState* rs){
+    curandState sc;
+    curand_init(1984,0,0,&sc);
+    world[0] = {Vector3(0,-1000,0), 1000, Material{LAMBERTIAN, Vector3(0.5,0.5,0.5), 0.0f, 0.0f}};
+    world[1] = {Vector3(0,1,0), 1 , Material{DIELECTRIC, Vector3(), 0.0F, 1.5f}};
+    world[2] = {Vector3(-4,1,0), 1, Material{LAMBERTIAN, Vector3(0.4,0.2,0.1), 0.0f, 0.0f}};
+    world[3] = {Vector3(4,1,0), 1, Material{METAL, Vector3(0.7,0.6,0.5), 0.0f, 0.0f}};
+    int k = 4;
+    for (int a = -11; a < 11; a++) {
+        for (int b = -11; b < 11; b++) {
+            float choose = curand_uniform(&sc);
+            Vector3 center(a + 0.9f*curand_uniform(&sc), 0.2f, b + 0.9f*curand_uniform(&sc));
+            Vector3 d = center - Vector3(4.0f, 0.2f, 0.0f);
+            if (length(d) > 0.9f) {              // skip spheres that hit the big one
+                Material mat;
+                if (choose < 0.8f) {                    // 80% diffuse
+                    mat.type = LAMBERTIAN;
+                    Vector3 albedo = random_vector(&sc) * random_vector(&sc);
+                    mat.albedo = albedo;
+                } else if (choose < 0.95f) {            // 15% metal
+                    mat.type = METAL;
+                    mat.albedo = random_vector(&sc);
+                    mat.fuzz = curand_uniform(&sc);
+                } else {                                // 5% glass
+                    mat.type = DIELECTRIC;
+                    mat.ior = 1.5f;
+                }
+                world[k] = {center, 0.2f, mat};
+                k++;
+            }
+        }
+    }
+    *actual = k;
 
 }
 
@@ -125,25 +246,26 @@ int main(){
     float* fb = nullptr;
     int width = 400;
     int height = 225;
-    int n = 4;
+    int n = 488;
+    int* actual;
     Sphere* world;
-    curandState* rand_state;
-
-    cudaMallocManaged((void **)&rand_state, width * height * sizeof(curandState));
+    curandState* rs;
+    
+    cudaMallocManaged(&actual, sizeof(int));
+    cudaMallocManaged((void **)&rs, width * height * sizeof(curandState));
     cudaMallocManaged(&world, n * sizeof(Sphere));
     cudaMallocManaged(&fb, 3*width*height*sizeof(float));
-
-    world[0] = {Vector3(0,-1000,0), 1000};
-    world[1] = {Vector3(0,1,0), 1};
-    world[2] = {Vector3(-4,1,0), 1};
-    world[3] = {Vector3(4,1,0), 1};
-
 
     dim3 blocks(width/8+1, height/8+1);
     dim3 threads(8,8);
 
-    render_init<<<blocks, threads>>>(rand_state, width, height);
-    render<<<blocks,threads>>>(fb, world, n, width, height, rand_state);
+    scene<<<1,1>>>(world, actual, rs);
+    cudaDeviceSynchronize();
+
+    n = *actual;
+    
+    render_init<<<blocks, threads>>>(rs, width, height);
+    render<<<blocks,threads>>>(fb, world, n, width, height, rs);
     cudaDeviceSynchronize();
 
     cudaError_t err = cudaGetLastError();
@@ -164,7 +286,7 @@ int main(){
 
     cudaFree(fb);
     cudaFree(world);
-    cudaFree(rand_state);
+    cudaFree(rs);
 
     return 0;
 }
