@@ -274,24 +274,29 @@ int main(){
     cudaMallocManaged(&world, n * sizeof(Sphere));
     cudaMallocManaged(&fb, 3*width*height*sizeof(float));
 
-    dim3 blocks(width/8+1, height/8+1);
-    dim3 threads(8,8);
-
+    // Build the scene on the device, then read back the actual sphere count.
     scene<<<1,1>>>(world, actual, rs);
     cudaDeviceSynchronize();
-
     n = *actual;
-    
-    render_init<<<blocks, threads>>>(rs, width, height);
 
     Camera cam = make_camera(width, height);
 
+    // Seed one curand state per pixel (this launch config is irrelevant to render timing).
+    dim3 initThreads(8, 8);
+    dim3 initBlocks((width + 7) / 8, (height + 7) / 8);
+    render_init<<<initBlocks, initThreads>>>(rs, width, height);
+
+    // Render launch config: 32x4 won a block-size sweep (128 threads, wide-x tiles → more
+    // coalesced framebuffer writes since threadIdx.x is the pixel column). Beat the original
+    // 8x8 by ~3% and the 256-thread configs by more. See git history for the full sweep.
+    const int TX = 32, TY = 4;
+    dim3 threads(TX, TY);
+    dim3 blocks((width + TX - 1) / TX, (height + TY - 1) / TY);
+
     // Benchmark the render kernel only (excludes context init, scene build, PPM write).
-    // GPU boost clocks drift with temperature, so a single shot is unreliable: warm the
-    // card with a few throwaway runs, then report the min (best-case steady clock) and
-    // median over the timed runs. CUDA events measure GPU work correctly across the async
-    // launch boundary. Every run re-renders into fb; the last one is what gets written out.
-    const int WARMUP = 3;
+    // Boost clocks drift with temperature, so one shot is unreliable: warm the card with a
+    // few throwaway runs, then report min (best-case clock) and median over the timed runs.
+    const int WARMUP = 20;   // this card keeps ramping boost for ~10s of load; 3 was too few
     const int TIMED  = 10;
     float times[TIMED];
 
@@ -302,7 +307,7 @@ int main(){
         cudaEventRecord(start);
         render<<<blocks,threads>>>(fb, world, n, width, height, rs, cam, samples_per_pixel);
         cudaEventRecord(stop);
-        cudaEventSynchronize(stop);    // block until this render has finished
+        cudaEventSynchronize(stop);
         float ms = 0.0f;
         cudaEventElapsedTime(&ms, start, stop);
         if (run >= WARMUP) times[run - WARMUP] = ms;
@@ -314,8 +319,8 @@ int main(){
     if (err != cudaSuccess) printf("CUDA error : %s\n", cudaGetErrorString(err));
 
     std::sort(times, times + TIMED);
-    fprintf(stderr, "CUDA render: min %.1f ms | median %.1f ms  (%dx%d, %d spp, depth 50, %d timed / %d warmup)\n",
-            times[0], times[TIMED / 2], width, height, samples_per_pixel, TIMED, WARMUP);
+    fprintf(stderr, "CUDA render: min %.1f ms | median %.1f ms  (%dx%d, %d spp, depth 50, block %dx%d)\n",
+            times[0], times[TIMED / 2], width, height, samples_per_pixel, TX, TY);
 
 
     std::ofstream out("image.ppm");
