@@ -265,11 +265,26 @@ int main(){
     n = *actual;
     
     render_init<<<blocks, threads>>>(rs, width, height);
+
+    // Time the render kernel only (excludes context init, scene build, PPM write) via
+    // CUDA events, which measure GPU work correctly across the async launch boundary.
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start);
     render<<<blocks,threads>>>(fb, world, n, width, height, rs);
-    cudaDeviceSynchronize();
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);        // block until the render kernel has finished
+    float render_ms = 0.0f;
+    cudaEventElapsedTime(&render_ms, start, stop);
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) printf("CUDA error : %s\n", cudaGetErrorString(err));
+
+    fprintf(stderr, "CUDA render: %.1f ms  (%dx%d, %d spp, depth 50)\n",
+            render_ms, width, height, 100);
 
 
     std::ofstream out("image.ppm");
@@ -285,6 +300,7 @@ int main(){
     }
 
     cudaFree(fb);
+    cudaFree(actual);
     cudaFree(world);
     cudaFree(rs);
 
