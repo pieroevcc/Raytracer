@@ -31,8 +31,9 @@ flowchart TD
 | CUDA, naive port | ~448 ms | ~115x |
 | CUDA, camera hoist + 32x4 blocks | ~445 ms | ~115x |
 
-Full size (1200x675, 100 spp): CUDA renders in **2.6 s**, which is *sub-linear*: 9x the pixels for only ~6x the time, because more pixels fill the GPU better.
+Full size (1200x675, 100 spp): CUDA renders in **2.6 s** (median 3.0 s), which is *sub-linear*: 9x the pixels for only ~6x the time, because more pixels fill the GPU better.
 
+**The honest part:** the optimizations barely moved the wall clock. Measured fairly (naive and optimized both warmed up), the camera hoist and block-size tuning landed within 1% of each other. The ~115x is parallelism, not clever tuning. What the optimizations *did* change was the profiler picture:
 
 | Metric | Naive | Optimized |
 | --- | --- | --- |
@@ -59,12 +60,13 @@ Full size (1200x675, 100 spp): CUDA renders in **2.6 s**, which is *sub-linear*:
 
 | Area | Tooling |
 | --- | --- |
-| CPU renderer | [C++17] (MSVC) |
-| GPU compute | [CUDA 13.3] (nvcc), arch `sm_89` | |
-| Profiling | [Nsight Compute] |
-| Build | (`build.ps1`) |
-| Image tooling | [PPM to PNG] (`ppm2png.py`) |
-| Hardware | [NVIDIA RTX 4060] (8 GB, Ada) |
+| CPU renderer | [C++17](https://en.cppreference.com/w/cpp/17) (MSVC) |
+| GPU compute | [CUDA 13.3](https://developer.nvidia.com/cuda-toolkit) (nvcc), arch `sm_89` |
+| Per-pixel RNG | [cuRAND](https://docs.nvidia.com/cuda/curand/) |
+| Profiling | [Nsight Compute](https://developer.nvidia.com/nsight-compute) |
+| Build | [PowerShell](https://learn.microsoft.com/en-us/powershell/) (`build.ps1`) |
+| Image tooling | [Pillow](https://python-pillow.org/) (`ppm2png.py`) |
+| Hardware | NVIDIA RTX 4060 (8 GB, Ada) |
 
 ---
 
