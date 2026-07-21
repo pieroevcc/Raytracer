@@ -11,6 +11,12 @@ struct Material { MatType type; Vector3 albedo; float fuzz; float ior; };
 
 struct Sphere { Vector3 center; float radius; Material mat; };
 struct HitRecord { Vector3 p; Vector3 normal; float t; bool front_face; Material mat; };
+struct Camera {
+    Vector3 center;
+    Vector3 pixel00_loc;
+    Vector3 pixel_delta_u, pixel_delta_v;
+    Vector3 defocus_disk_u, defocus_disk_v;
+};
 
 __device__ Vector3 random_unit_vector(curandState* rs){
     while(true){
@@ -144,22 +150,8 @@ __device__ Vector3 ray_color(Ray r, const Sphere* world, int n, curandState* rs)
     return Vector3(0,0,0);             
 }
 
-__global__ void render_init(curandState* rand_state, int width, int height) {
-    int i = threadIdx.x + blockIdx.x * blockDim.x;
-    int j = threadIdx.y + blockIdx.y * blockDim.y;
-    if (i >= width || j >= height) return;
-    curand_init(1984, j*width + i, 0, &rand_state[j*width+i]);
-}
-
-__global__ void render (float* fb, const Sphere* world, int n, int width, int height, curandState* rs){
-    int i = threadIdx.x + blockIdx.x * blockDim.x;
-    int j = threadIdx.y + blockIdx.y * blockDim.y;
-    if (i >= width || j >= height) return;
-    int pixel_index = j*width + i;
-    curandState local_rand = rs[pixel_index];
-
+Camera make_camera(int width, int height) {
     float vfov = 20.0f;
-    int samples_per_pixel = 100;
     Vector3 lookfrom = Vector3(13,2,3), lookat = Vector3(0,0,0), vup = Vector3(0,1,0);
     float defocus_angle = 0.6f, focus_dist = 10.0f;
     Vector3 center, pixel00_loc, pixel_delta_u, pixel_delta_v;
@@ -186,15 +178,41 @@ __global__ void render (float* fb, const Sphere* world, int n, int width, int he
     Vector3 viewport_upper_left = center - focus_dist * w - viewport_u / 2.0f - viewport_v / 2.0f;
     pixel00_loc = 0.5f * (pixel_delta_u + pixel_delta_v) +  viewport_upper_left;
 
+    Camera cam;
+    cam.center         = center;
+    cam.pixel00_loc    = pixel00_loc;
+    cam.pixel_delta_u  = pixel_delta_u;
+    cam.pixel_delta_v  = pixel_delta_v;
+    cam.defocus_disk_u = defocus_disk_u;
+    cam.defocus_disk_v = defocus_disk_v;
+    return cam;
+}
+
+__global__ void render_init(curandState* rand_state, int width, int height) {
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    int j = threadIdx.y + blockIdx.y * blockDim.y;
+    if (i >= width || j >= height) return;
+    curand_init(1984, j*width + i, 0, &rand_state[j*width+i]);
+}
+
+__global__ void render (float* fb, const Sphere* world, int n, int width, int height, curandState* rs, Camera cam){
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    int j = threadIdx.y + blockIdx.y * blockDim.y;
+    if (i >= width || j >= height) return;
+    int pixel_index = j*width + i;
+    curandState local_rand = rs[pixel_index];
+
+    int samples_per_pixel = 10;
+    
     Vector3 pixel_color;
     for (int s = 0; s < samples_per_pixel; s++){
         Vector3 p = random_in_unit_disk(&local_rand);
-        Vector3 ray_origin = center + p.x * defocus_disk_u + p.y * defocus_disk_v;
+        Vector3 ray_origin = cam.center + p.x * cam.defocus_disk_u + p.y * cam.defocus_disk_v;
         float ox = curand_uniform(&local_rand) - 0.5f;
         float oy = curand_uniform(&local_rand) - 0.5f;
-        Vector3 sample = pixel00_loc + (i + ox) * pixel_delta_u + (j + oy) * pixel_delta_v;
+        Vector3 sample = cam.pixel00_loc + (i + ox) * cam.pixel_delta_u + (j + oy) * cam.pixel_delta_v;
         Ray r = Ray(ray_origin, sample - ray_origin);
-        pixel_color = pixel_color + ray_color(r, world, n , &local_rand);;
+        pixel_color = pixel_color + ray_color(r, world, n, &local_rand);;
     }
     rs[pixel_index] = local_rand;
     pixel_color = pixel_color * 1.0f/samples_per_pixel;
@@ -266,13 +284,15 @@ int main(){
     
     render_init<<<blocks, threads>>>(rs, width, height);
 
+    Camera cam = make_camera(width, height);
+
     // Time the render kernel only (excludes context init, scene build, PPM write) via
     // CUDA events, which measure GPU work correctly across the async launch boundary.
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     cudaEventRecord(start);
-    render<<<blocks,threads>>>(fb, world, n, width, height, rs);
+    render<<<blocks,threads>>>(fb, world, n, width, height, rs, cam);
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);        // block until the render kernel has finished
     float render_ms = 0.0f;
