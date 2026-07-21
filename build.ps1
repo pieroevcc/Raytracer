@@ -34,6 +34,8 @@ if (Test-Path "main.cu") {
     Write-Host "==> Building CUDA raytracer (raytracer_cuda.exe)" -ForegroundColor Cyan
     # -arch=sm_89: emit native code for the RTX 4060 (Ada) instead of PTX,
     # so the (older) driver never has to JIT-compile it
+    # NOTE: --use_fast_math was measured ~5% SLOWER here (raised occupancy thrashed L1/L2),
+    # so it is deliberately omitted. Wall-clock overruled the occupancy metric. Don't re-add.
     nvcc -O3 -arch=sm_89 -o raytracer_cuda.exe main.cu
     if ($LASTEXITCODE -ne 0) { throw "CUDA build failed" }
 }

@@ -3,6 +3,7 @@
 #include <curand_kernel.h>
 #include <fstream>
 #include <iostream>
+#include <algorithm>
 #include "vec3.h"
 #include "ray.h"
 
@@ -195,17 +196,15 @@ __global__ void render_init(curandState* rand_state, int width, int height) {
     curand_init(1984, j*width + i, 0, &rand_state[j*width+i]);
 }
 
-__global__ void render (float* fb, const Sphere* world, int n, int width, int height, curandState* rs, Camera cam){
+__global__ void render (float* fb, const Sphere* world, int n, int width, int height, curandState* rs, Camera cam, int spp){
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
     if (i >= width || j >= height) return;
     int pixel_index = j*width + i;
     curandState local_rand = rs[pixel_index];
-
-    int samples_per_pixel = 10;
-    
+ 
     Vector3 pixel_color;
-    for (int s = 0; s < samples_per_pixel; s++){
+    for (int s = 0; s < spp; s++){
         Vector3 p = random_in_unit_disk(&local_rand);
         Vector3 ray_origin = cam.center + p.x * cam.defocus_disk_u + p.y * cam.defocus_disk_v;
         float ox = curand_uniform(&local_rand) - 0.5f;
@@ -215,7 +214,7 @@ __global__ void render (float* fb, const Sphere* world, int n, int width, int he
         pixel_color = pixel_color + ray_color(r, world, n, &local_rand);;
     }
     rs[pixel_index] = local_rand;
-    pixel_color = pixel_color * 1.0f/samples_per_pixel;
+    pixel_color = pixel_color * 1.0f/spp;
     int idx = 3 * (j * width + i);
     fb[idx] = sqrtf(pixel_color.x);
     fb[idx+1] = sqrtf(pixel_color.y);
@@ -264,6 +263,7 @@ int main(){
     float* fb = nullptr;
     int width = 400;
     int height = 225;
+    int samples_per_pixel = 100;
     int n = 488;
     int* actual;
     Sphere* world;
@@ -286,25 +286,36 @@ int main(){
 
     Camera cam = make_camera(width, height);
 
-    // Time the render kernel only (excludes context init, scene build, PPM write) via
-    // CUDA events, which measure GPU work correctly across the async launch boundary.
+    // Benchmark the render kernel only (excludes context init, scene build, PPM write).
+    // GPU boost clocks drift with temperature, so a single shot is unreliable: warm the
+    // card with a few throwaway runs, then report the min (best-case steady clock) and
+    // median over the timed runs. CUDA events measure GPU work correctly across the async
+    // launch boundary. Every run re-renders into fb; the last one is what gets written out.
+    const int WARMUP = 3;
+    const int TIMED  = 10;
+    float times[TIMED];
+
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
-    cudaEventRecord(start);
-    render<<<blocks,threads>>>(fb, world, n, width, height, rs, cam);
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);        // block until the render kernel has finished
-    float render_ms = 0.0f;
-    cudaEventElapsedTime(&render_ms, start, stop);
+    for (int run = 0; run < WARMUP + TIMED; run++) {
+        cudaEventRecord(start);
+        render<<<blocks,threads>>>(fb, world, n, width, height, rs, cam, samples_per_pixel);
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);    // block until this render has finished
+        float ms = 0.0f;
+        cudaEventElapsedTime(&ms, start, stop);
+        if (run >= WARMUP) times[run - WARMUP] = ms;
+    }
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) printf("CUDA error : %s\n", cudaGetErrorString(err));
 
-    fprintf(stderr, "CUDA render: %.1f ms  (%dx%d, %d spp, depth 50)\n",
-            render_ms, width, height, 100);
+    std::sort(times, times + TIMED);
+    fprintf(stderr, "CUDA render: min %.1f ms | median %.1f ms  (%dx%d, %d spp, depth 50, %d timed / %d warmup)\n",
+            times[0], times[TIMED / 2], width, height, samples_per_pixel, TIMED, WARMUP);
 
 
     std::ofstream out("image.ppm");
