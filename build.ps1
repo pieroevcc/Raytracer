@@ -40,8 +40,24 @@ if (Test-Path "main.cu") {
     if ($LASTEXITCODE -ne 0) { throw "CUDA build failed" }
 }
 
+# --- Interactive build (GLFW + OpenGL, CUDA-GL interop from A2 on; only if the source exists) ---
+# Compiled with nvcc even though A1 has no device code, so A2's interop lands in the same file
+# with zero rewiring. GLFW/GLAD come from vcpkg; full lib paths dodge any -L search ambiguity,
+# opengl32.lib resolves off the vcvars LIB path. glfw3.dll must sit next to the exe at runtime.
+# -Xcompiler "/MD": vcpkg's x64-windows libs are built against the DYNAMIC CRT, but nvcc's host
+# default is the STATIC CRT (/MT) -> unresolved __imp_* symbols + LNK4098. /MD matches them.
+if (Test-Path "interactive.cu") {
+    Write-Host "==> Building interactive renderer (raytracer_interactive.exe)" -ForegroundColor Cyan
+    $vcpkg = "C:\Users\piere\vcpkg\installed\x64-windows"
+    nvcc -O3 -arch=sm_89 -Xcompiler "/MD" -I"$vcpkg\include" -o raytracer_interactive.exe interactive.cu "$vcpkg\lib\glfw3dll.lib" "$vcpkg\lib\glad.lib" opengl32.lib
+    if ($LASTEXITCODE -ne 0) { throw "Interactive build failed" }
+    Copy-Item "$vcpkg\bin\glfw3.dll" -Destination $PSScriptRoot -Force
+}
+
 Write-Host "==> Build OK" -ForegroundColor Green
 
 if ($Run) {
-    if (Test-Path "raytracer_cuda.exe") { .\raytracer_cuda.exe } else { .\raytracer.exe }
+    if     (Test-Path "raytracer_interactive.exe") { .\raytracer_interactive.exe }
+    elseif (Test-Path "raytracer_cuda.exe")        { .\raytracer_cuda.exe }
+    else                                            { .\raytracer.exe }
 }

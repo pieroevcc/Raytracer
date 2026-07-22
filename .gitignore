@@ -1,5 +1,6 @@
 # Build artifacts
 *.exe
+*.dll
 *.obj
 *.o
 *.exp
