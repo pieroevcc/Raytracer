@@ -3,8 +3,15 @@
 #include <fstream>
 #include <iostream>
 #include <vector>
+#include <cuda_runtime.h>
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+#include <cuda_gl_interop.h>
+#include "raytracer.cuh"
+
+extern "C" {
+    __declspec(dllexport) unsigned long NvOptimusEnablement = 0x00000001;
+}
 
 
 static GLFWwindow* init_window(int W, int H) {
@@ -55,7 +62,7 @@ static GLuint make_program() {
         "in vec2 uv;\n"
         "out vec4 frag;\n"
         "uniform sampler2D tex;\n"
-        "void main() { frag = texture(tex, uv); }\n";
+        "void main() { frag = texture(tex, vec2(uv.x, 1.0 - uv.y)); }\n";
     GLuint v = compile_shader(GL_VERTEX_SHADER, VERT);
     GLuint f = compile_shader(GL_FRAGMENT_SHADER, FRAG);
     GLuint p = glCreateProgram();
@@ -73,10 +80,26 @@ static GLuint make_fullscreen_vao() { //Vertex Array Object
     return vao;
 }
 
-void fill_test_pattern(std::vector<uchar4>& px, int W, int H) {
-    for (int y = 0; y < H; ++y)
-        for (int x = 0; x < W; ++x)
-            px[y*W + x] = make_uchar4(255*x/W, 255*y/H, 128, 255);
+static GLuint make_pbo(int W, int H){ //make Picture Buffer Object
+    GLuint buf;
+    glGenBuffers(1, &buf);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buf);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, W*H*sizeof(uchar4), nullptr, GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    return buf;
+}
+
+__global__ void float_to_uchar4(uchar4* out, const float* fb, int W, int H){
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x >= W || y >= H) return;
+
+    int fbi = 3*(y*W + x);
+    int r = static_cast<unsigned char>(fminf(fmaxf(fb[fbi],0), 1) * 255.999f);
+    int g = static_cast<unsigned char>(fminf(fmaxf(fb[fbi+1],0), 1) * 255.999f);
+    int b = static_cast<unsigned char>(fminf(fmaxf(fb[fbi+2],0), 1) * 255.999f);
+
+    out[y*W+x] = make_uchar4(r, g, b, 255);
 }
 
 int main(){
@@ -85,11 +108,63 @@ int main(){
     GLuint tex = make_texture(W,H);
     GLuint prog = make_program();
     GLuint vao = make_fullscreen_vao();
+    GLuint pbo = make_pbo(W,H);
+    cudaGraphicsResource* cudaPbo;
+
+    int* actual;
+    int spp = 100;
+    curandState* rs;
+    Sphere* world;
+    int n = 488;
+    float* fb = nullptr;
+
+    cudaMallocManaged(&actual, sizeof(int));
+    cudaMallocManaged((void **)&rs, W * H * sizeof(curandState));
+    cudaMallocManaged(&world, n * sizeof(Sphere));
+    cudaMallocManaged(&fb, 3*W*H*sizeof(float));
+
+    scene<<<1,1>>>(world, actual, rs);
+    cudaDeviceSynchronize();
+    n = *actual;
+
+    Camera cam = make_camera(W,H);
+    dim3 initThreads(8, 8);
+    dim3 initBlocks((W + 7) / 8, (H + 7) / 8);
+    render_init<<<initBlocks, initThreads>>>(rs, W, H);
+
+    const int TX = 32, TY = 4;
+    dim3 threads(TX, TY);
+    dim3 blocks((W + TX - 1) / TX, (H + TY - 1) / TY);
+    render<<<blocks,threads>>>(fb, world, n, W, H, rs, cam, spp);
     
-    std::vector<uchar4> pixels(W*H);
-    fill_test_pattern(pixels, W, H);
+    cudaError_t err5 = cudaGetLastError();
+    if (err5 != cudaSuccess) printf("CUDA error : %s\n", cudaGetErrorString(err5));
+    cudaDeviceSynchronize();
+
+
+    cudaError_t err = cudaGraphicsGLRegisterBuffer(&cudaPbo, pbo, cudaGraphicsRegisterFlagsWriteDiscard);
+    if (err != cudaSuccess){ printf("CUDA error : %s\n", cudaGetErrorString(err)); exit(1); } 
+    cudaError_t err1 = cudaGraphicsMapResources(1, &cudaPbo, 0);
+    if (err1 != cudaSuccess){ printf("CUDA error : %s\n", cudaGetErrorString(err1)); exit(1); } 
+    uchar4* devPtr;
+    size_t numBytes;
+    cudaError_t err2 = cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &numBytes, cudaPbo);
+    if (err2 != cudaSuccess){ printf("CUDA error : %s\n", cudaGetErrorString(err2)); exit(1); } 
+    
+    dim3 block(16,16);
+    dim3 grid((W + block.x - 1)/block.x, (H + block.y - 1)/block.y);
+
+    float_to_uchar4<<<grid, block>>>(devPtr, fb, W , H);
+
+    cudaError_t err3 = cudaGetLastError();
+    if (err3 != cudaSuccess) { printf("CUDA error : %s\n", cudaGetErrorString(err3)); exit(1);}
+    cudaDeviceSynchronize();
+    cudaError_t err4 = cudaGraphicsUnmapResources(1, &cudaPbo, 0);
+    if (err4 != cudaSuccess){ printf("CUDA error : %s\n", cudaGetErrorString(err4)); exit(1); } 
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glBindTexture(GL_TEXTURE_2D, tex);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, (void*)0);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
 
     while(!glfwWindowShouldClose(window)){ //poll -> clear -> bind (program/vao/tex) -> draw -> swap
