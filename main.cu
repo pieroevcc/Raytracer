@@ -28,7 +28,7 @@ int main(){
     cudaDeviceSynchronize();
     n = *actual;
 
-    Camera cam = make_camera(width, height);
+    Camera cam = make_camera(width, height, Vector3(13,2,3), Vector3(0,0,0));
 
 
     dim3 initThreads(8, 8);

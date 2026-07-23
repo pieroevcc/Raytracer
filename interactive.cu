@@ -102,7 +102,40 @@ __global__ void float_to_uchar4(uchar4* out, const float* fb, int W, int H){
     out[y*W+x] = make_uchar4(r, g, b, 255);
 }
 
+void update_camera(GLFWwindow* win, Vector3& lookfrom, Vector3& lookat){
+    Vector3 forward = unit(lookat - lookfrom);
+    Vector3 right = unit(cross(forward, Vector3(0,1,0)));
+    float speed = 0.1f;
+    Vector3 fs = forward*speed;
+    Vector3 rs = right*speed;
+    if (glfwGetKey(win, GLFW_KEY_W) == GLFW_PRESS){
+        lookfrom = lookfrom + fs;
+        lookat = lookat + fs;
+    }
+    if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS){
+        lookfrom = lookfrom + rs;
+        lookat = lookat + rs;
+    }
+    if (glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS){
+        lookfrom = lookfrom - fs;
+        lookat = lookat - fs;
+    }
+    if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS){
+        lookfrom = lookfrom - rs;
+        lookat = lookat - rs;
+    }
+    if (glfwGetKey(win, GLFW_KEY_SPACE) == GLFW_PRESS){
+        lookfrom = lookfrom + Vector3(0,1,0)*speed;
+        lookat = lookat + Vector3(0,1,0)*speed;
+    }
+    if (glfwGetKey(win, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS){
+        lookfrom = lookfrom - Vector3(0,1,0)*speed;
+        lookat = lookat - Vector3(0,1,0)*speed;
+    }
+}
+
 int main(){
+    //window display
     const int W = 800, H = 450;
     GLFWwindow* window = init_window(W,H);
     GLuint tex = make_texture(W,H);
@@ -111,12 +144,15 @@ int main(){
     GLuint pbo = make_pbo(W,H);
     cudaGraphicsResource* cudaPbo;
 
+    //pixel color
     int* actual;
-    int spp = 100;
+    int spp = 1;
     curandState* rs;
     Sphere* world;
-    int n = 488;
+    int n;
     float* fb = nullptr;
+    Vector3 lookfrom(13,2,3);
+    Vector3 lookat(0,0,0);
 
     cudaMallocManaged(&actual, sizeof(int));
     cudaMallocManaged((void **)&rs, W * H * sizeof(curandState));
@@ -127,7 +163,8 @@ int main(){
     cudaDeviceSynchronize();
     n = *actual;
 
-    Camera cam = make_camera(W,H);
+    Camera cam = make_camera(W,H, lookfrom, lookat);
+
     dim3 initThreads(8, 8);
     dim3 initBlocks((W + 7) / 8, (H + 7) / 8);
     render_init<<<initBlocks, initThreads>>>(rs, W, H);
@@ -135,46 +172,52 @@ int main(){
     const int TX = 32, TY = 4;
     dim3 threads(TX, TY);
     dim3 blocks((W + TX - 1) / TX, (H + TY - 1) / TY);
-    render<<<blocks,threads>>>(fb, world, n, W, H, rs, cam, spp);
     
-    cudaError_t err5 = cudaGetLastError();
-    if (err5 != cudaSuccess) printf("CUDA error : %s\n", cudaGetErrorString(err5));
-    cudaDeviceSynchronize();
-
 
     cudaError_t err = cudaGraphicsGLRegisterBuffer(&cudaPbo, pbo, cudaGraphicsRegisterFlagsWriteDiscard);
     if (err != cudaSuccess){ printf("CUDA error : %s\n", cudaGetErrorString(err)); exit(1); } 
-    cudaError_t err1 = cudaGraphicsMapResources(1, &cudaPbo, 0);
-    if (err1 != cudaSuccess){ printf("CUDA error : %s\n", cudaGetErrorString(err1)); exit(1); } 
-    uchar4* devPtr;
-    size_t numBytes;
-    cudaError_t err2 = cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &numBytes, cudaPbo);
-    if (err2 != cudaSuccess){ printf("CUDA error : %s\n", cudaGetErrorString(err2)); exit(1); } 
-    
-    dim3 block(16,16);
-    dim3 grid((W + block.x - 1)/block.x, (H + block.y - 1)/block.y);
-
-    float_to_uchar4<<<grid, block>>>(devPtr, fb, W , H);
-
-    cudaError_t err3 = cudaGetLastError();
-    if (err3 != cudaSuccess) { printf("CUDA error : %s\n", cudaGetErrorString(err3)); exit(1);}
-    cudaDeviceSynchronize();
-    cudaError_t err4 = cudaGraphicsUnmapResources(1, &cudaPbo, 0);
-    if (err4 != cudaSuccess){ printf("CUDA error : %s\n", cudaGetErrorString(err4)); exit(1); } 
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, (void*)0);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-
+   
 
     while(!glfwWindowShouldClose(window)){ //poll -> clear -> bind (program/vao/tex) -> draw -> swap
         glfwPollEvents();
+
+        update_camera(window, lookfrom, lookat);
+        cam = make_camera(W, H, lookfrom, lookat);
+
+        cudaError_t err1 = cudaGraphicsMapResources(1, &cudaPbo, 0);
+        if (err1 != cudaSuccess){ printf("CUDA error : %s\n", cudaGetErrorString(err1)); exit(1); } 
+        uchar4* devPtr;
+        size_t numBytes;
+        cudaError_t err2 = cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &numBytes, cudaPbo);
+        if (err2 != cudaSuccess){ printf("CUDA error : %s\n", cudaGetErrorString(err2)); exit(1); } 
+
+        render<<<blocks,threads>>>(fb, world, n, W, H, rs, cam, spp);
+    
+        cudaError_t err5 = cudaGetLastError();
+        if (err5 != cudaSuccess) printf("CUDA error : %s\n", cudaGetErrorString(err5));
+        cudaDeviceSynchronize();
+        
+        dim3 block(16,16);
+        dim3 grid((W + block.x - 1)/block.x, (H + block.y - 1)/block.y);
+    
+        float_to_uchar4<<<grid, block>>>(devPtr, fb, W , H);
+    
+        cudaError_t err3 = cudaGetLastError();
+        if (err3 != cudaSuccess) { printf("CUDA error : %s\n", cudaGetErrorString(err3)); exit(1);}
+        cudaDeviceSynchronize();
+        cudaError_t err4 = cudaGraphicsUnmapResources(1, &cudaPbo, 0);
+        if (err4 != cudaSuccess){ printf("CUDA error : %s\n", cudaGetErrorString(err4)); exit(1); } 
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, (void*)0);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
         glClear(GL_COLOR_BUFFER_BIT);
         glUseProgram(prog);
         glBindVertexArray(vao);
         glBindTexture(GL_TEXTURE_2D, tex);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         glfwSwapBuffers(window);
+    
     }
     glfwTerminate();
     return 0;

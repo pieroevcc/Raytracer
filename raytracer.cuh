@@ -149,9 +149,9 @@ __device__ Vector3 ray_color(Ray r, const Sphere* world, int n, curandState* rs)
     return Vector3(0,0,0);             
 }
 
-Camera make_camera(int width, int height) {
+Camera make_camera(int width, int height, Vector3 lookfrom, Vector3 lookat) {
     float vfov = 20.0f;
-    Vector3 lookfrom = Vector3(13,2,3), lookat = Vector3(0,0,0), vup = Vector3(0,1,0);
+    Vector3 vup = Vector3(0,1,0);
     float defocus_angle = 0.6f, focus_dist = 10.0f;
     Vector3 center, pixel00_loc, pixel_delta_u, pixel_delta_v;
     Vector3 u, v, w, defocus_disk_u, defocus_disk_v;
