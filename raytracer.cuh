@@ -194,7 +194,7 @@ __global__ void render_init(curandState* rand_state, int width, int height) {
     curand_init(1984, j*width + i, 0, &rand_state[j*width+i]);
 }
 
-__global__ void render (float* fb, const Sphere* world, int n, int width, int height, curandState* rs, Camera cam, int spp){
+__global__ void render (float* fb, const Sphere* world, int n, int width, int height, curandState* rs, Camera cam, int spp, bool do_gamma = true){
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
     if (i >= width || j >= height) return;
@@ -214,9 +214,9 @@ __global__ void render (float* fb, const Sphere* world, int n, int width, int he
     rs[pixel_index] = local_rand;
     pixel_color = pixel_color * 1.0f/spp;
     int idx = 3 * (j * width + i);
-    fb[idx] = sqrtf(pixel_color.x);
-    fb[idx+1] = sqrtf(pixel_color.y);
-    fb[idx+2] = sqrtf(pixel_color.z);
+    fb[idx] = (do_gamma) ? sqrtf(pixel_color.x) : pixel_color.x;
+    fb[idx+1] = (do_gamma) ? sqrtf(pixel_color.y) : pixel_color.y;
+    fb[idx+2] = (do_gamma) ? sqrtf(pixel_color.z) : pixel_color.z;
 
 }
 __global__ void scene(Sphere* world, int* actual, curandState* rs){

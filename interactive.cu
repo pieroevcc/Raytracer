@@ -89,20 +89,22 @@ static GLuint make_pbo(int W, int H){ //make Picture Buffer Object
     return buf;
 }
 
-__global__ void float_to_uchar4(uchar4* out, const float* fb, int W, int H){
+__global__ void float_to_uchar4(uchar4* out, const float* fb, float* accum, int count, int W, int H){
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= W || y >= H) return;
 
     int fbi = 3*(y*W + x);
-    int r = static_cast<unsigned char>(fminf(fmaxf(fb[fbi],0), 1) * 255.999f);
-    int g = static_cast<unsigned char>(fminf(fmaxf(fb[fbi+1],0), 1) * 255.999f);
-    int b = static_cast<unsigned char>(fminf(fmaxf(fb[fbi+2],0), 1) * 255.999f);
+    accum[fbi] += fb[fbi]; accum[fbi+1] += fb[fbi+1]; accum[fbi+2] += fb[fbi+2];
+    int r = static_cast<unsigned char>(fminf(fmaxf(sqrtf(accum[fbi]/count),0), 1) * 255.999f);
+    int g = static_cast<unsigned char>(fminf(fmaxf(sqrtf(accum[fbi+1]/count),0), 1) * 255.999f);
+    int b = static_cast<unsigned char>(fminf(fmaxf(sqrtf(accum[fbi+2]/count),0), 1) * 255.999f);
 
     out[y*W+x] = make_uchar4(r, g, b, 255);
 }
 
-void update_camera(GLFWwindow* win, Vector3& lookfrom, Vector3& lookat){
+bool update_camera(GLFWwindow* win, Vector3& lookfrom, Vector3& lookat){
+    bool moved = false;
     Vector3 forward = unit(lookat - lookfrom);
     Vector3 right = unit(cross(forward, Vector3(0,1,0)));
     float speed = 0.1f;
@@ -111,27 +113,34 @@ void update_camera(GLFWwindow* win, Vector3& lookfrom, Vector3& lookat){
     if (glfwGetKey(win, GLFW_KEY_W) == GLFW_PRESS){
         lookfrom = lookfrom + fs;
         lookat = lookat + fs;
+        moved = true;
     }
     if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS){
         lookfrom = lookfrom + rs;
         lookat = lookat + rs;
+        moved = true;
     }
     if (glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS){
         lookfrom = lookfrom - fs;
         lookat = lookat - fs;
+        moved = true;
     }
     if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS){
         lookfrom = lookfrom - rs;
         lookat = lookat - rs;
+        moved = true;
     }
     if (glfwGetKey(win, GLFW_KEY_SPACE) == GLFW_PRESS){
         lookfrom = lookfrom + Vector3(0,1,0)*speed;
         lookat = lookat + Vector3(0,1,0)*speed;
+        moved = true;
     }
     if (glfwGetKey(win, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS){
         lookfrom = lookfrom - Vector3(0,1,0)*speed;
         lookat = lookat - Vector3(0,1,0)*speed;
+        moved = true;
     }
+    return moved;
 }
 
 int main(){
@@ -149,11 +158,15 @@ int main(){
     int spp = 1;
     curandState* rs;
     Sphere* world;
-    int n;
+    int n = 488;
     float* fb = nullptr;
     Vector3 lookfrom(13,2,3);
     Vector3 lookat(0,0,0);
+    float* accum;
+    int count = 0;
 
+    cudaMallocManaged(&accum, 3*W*H*sizeof(float));
+    cudaMemset(accum, 0, 3*W*H*sizeof(float));
     cudaMallocManaged(&actual, sizeof(int));
     cudaMallocManaged((void **)&rs, W * H * sizeof(curandState));
     cudaMallocManaged(&world, n * sizeof(Sphere));
@@ -181,9 +194,14 @@ int main(){
     while(!glfwWindowShouldClose(window)){ //poll -> clear -> bind (program/vao/tex) -> draw -> swap
         glfwPollEvents();
 
-        update_camera(window, lookfrom, lookat);
+        bool moved = update_camera(window, lookfrom, lookat);
         cam = make_camera(W, H, lookfrom, lookat);
 
+        if (moved) {
+            count = 0;
+            cudaMemset(accum, 0, 3*W*H*sizeof(float));
+        }
+        count++;
         cudaError_t err1 = cudaGraphicsMapResources(1, &cudaPbo, 0);
         if (err1 != cudaSuccess){ printf("CUDA error : %s\n", cudaGetErrorString(err1)); exit(1); } 
         uchar4* devPtr;
@@ -191,7 +209,7 @@ int main(){
         cudaError_t err2 = cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &numBytes, cudaPbo);
         if (err2 != cudaSuccess){ printf("CUDA error : %s\n", cudaGetErrorString(err2)); exit(1); } 
 
-        render<<<blocks,threads>>>(fb, world, n, W, H, rs, cam, spp);
+        render<<<blocks,threads>>>(fb, world, n, W, H, rs, cam, spp, false);
     
         cudaError_t err5 = cudaGetLastError();
         if (err5 != cudaSuccess) printf("CUDA error : %s\n", cudaGetErrorString(err5));
@@ -200,7 +218,7 @@ int main(){
         dim3 block(16,16);
         dim3 grid((W + block.x - 1)/block.x, (H + block.y - 1)/block.y);
     
-        float_to_uchar4<<<grid, block>>>(devPtr, fb, W , H);
+        float_to_uchar4<<<grid, block>>>(devPtr, fb, accum, count, W , H);
     
         cudaError_t err3 = cudaGetLastError();
         if (err3 != cudaSuccess) { printf("CUDA error : %s\n", cudaGetErrorString(err3)); exit(1);}
