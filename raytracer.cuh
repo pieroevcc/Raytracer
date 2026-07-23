@@ -129,9 +129,9 @@ __device__ bool hit_world(const Sphere* world, int n, const Ray& r, float t_min,
 
 }
 
-__device__ Vector3 ray_color(Ray r, const Sphere* world, int n, curandState* rs){
+__device__ Vector3 ray_color(Ray r, const Sphere* world, int n, curandState* rs, int max_depth){
     Vector3 throughput = Vector3(1,1,1);
-    for (int depth = 0; depth < 50; depth++){
+    for (int depth = 0; depth < max_depth; depth++){
         HitRecord rec;
         if (hit_world(world, n, r, 0.001f, 1e30f, rec)){
             Vector3 attenuation; Ray scattered; 
@@ -194,7 +194,7 @@ __global__ void render_init(curandState* rand_state, int width, int height) {
     curand_init(1984, j*width + i, 0, &rand_state[j*width+i]);
 }
 
-__global__ void render (float* fb, const Sphere* world, int n, int width, int height, curandState* rs, Camera cam, int spp, bool do_gamma = true){
+__global__ void render (float* fb, const Sphere* world, int n, int width, int height, curandState* rs, Camera cam, int spp, bool do_gamma = true, int max_depth = 50){
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
     if (i >= width || j >= height) return;
@@ -209,7 +209,7 @@ __global__ void render (float* fb, const Sphere* world, int n, int width, int he
         float oy = curand_uniform(&local_rand) - 0.5f;
         Vector3 sample = cam.pixel00_loc + (i + ox) * cam.pixel_delta_u + (j + oy) * cam.pixel_delta_v;
         Ray r = Ray(ray_origin, sample - ray_origin);
-        pixel_color = pixel_color + ray_color(r, world, n, &local_rand);;
+        pixel_color = pixel_color + ray_color(r, world, n, &local_rand, max_depth);;
     }
     rs[pixel_index] = local_rand;
     pixel_color = pixel_color * 1.0f/spp;

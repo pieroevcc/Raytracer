@@ -165,6 +165,11 @@ int main(){
     float* accum;
     int count = 0;
 
+    //event handles
+    cudaEvent_t start, stop;
+    float ms_sum = 0;
+    int frames = 0;
+
     cudaMallocManaged(&accum, 3*W*H*sizeof(float));
     cudaMemset(accum, 0, 3*W*H*sizeof(float));
     cudaMallocManaged(&actual, sizeof(int));
@@ -190,6 +195,8 @@ int main(){
     cudaError_t err = cudaGraphicsGLRegisterBuffer(&cudaPbo, pbo, cudaGraphicsRegisterFlagsWriteDiscard);
     if (err != cudaSuccess){ printf("CUDA error : %s\n", cudaGetErrorString(err)); exit(1); } 
    
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
 
     while(!glfwWindowShouldClose(window)){ //poll -> clear -> bind (program/vao/tex) -> draw -> swap
         glfwPollEvents();
@@ -202,29 +209,47 @@ int main(){
             cudaMemset(accum, 0, 3*W*H*sizeof(float));
         }
         count++;
+
         cudaError_t err1 = cudaGraphicsMapResources(1, &cudaPbo, 0);
         if (err1 != cudaSuccess){ printf("CUDA error : %s\n", cudaGetErrorString(err1)); exit(1); } 
         uchar4* devPtr;
         size_t numBytes;
+
         cudaError_t err2 = cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &numBytes, cudaPbo);
         if (err2 != cudaSuccess){ printf("CUDA error : %s\n", cudaGetErrorString(err2)); exit(1); } 
 
-        render<<<blocks,threads>>>(fb, world, n, W, H, rs, cam, spp, false);
+        cudaEventRecord(start, 0);
+        render<<<blocks,threads>>>(fb, world, n, W, H, rs, cam, spp, false, 8);
     
         cudaError_t err5 = cudaGetLastError();
         if (err5 != cudaSuccess) printf("CUDA error : %s\n", cudaGetErrorString(err5));
-        cudaDeviceSynchronize();
         
         dim3 block(16,16);
         dim3 grid((W + block.x - 1)/block.x, (H + block.y - 1)/block.y);
     
         float_to_uchar4<<<grid, block>>>(devPtr, fb, accum, count, W , H);
+        cudaEventRecord(stop, 0);
+        cudaEventSynchronize(stop);
+        float ms;
+        cudaEventElapsedTime(&ms, start, stop);
+
+        ms_sum += ms; frames++;
+        float avg = 0;
+        if (frames == 30){
+            avg = ms_sum / frames;
+            ms_sum = 0; frames = 0;
+            char buf[128];
+            snprintf(buf, sizeof(buf), "CUDA Ray Tracer | %.2f ms | %.0f fps", avg, 1000.0f/avg);
+            glfwSetWindowTitle(window, buf);
+        }
     
         cudaError_t err3 = cudaGetLastError();
         if (err3 != cudaSuccess) { printf("CUDA error : %s\n", cudaGetErrorString(err3)); exit(1);}
         cudaDeviceSynchronize();
+
         cudaError_t err4 = cudaGraphicsUnmapResources(1, &cudaPbo, 0);
         if (err4 != cudaSuccess){ printf("CUDA error : %s\n", cudaGetErrorString(err4)); exit(1); } 
+
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
         glBindTexture(GL_TEXTURE_2D, tex);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, (void*)0);
@@ -237,6 +262,8 @@ int main(){
         glfwSwapBuffers(window);
     
     }
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
     glfwTerminate();
     return 0;
 }
