@@ -16,8 +16,7 @@
 *.ppm
 *.png
 *.ncu-rep
-!assets/showcase.ppm
-!assets/showcase.png
+!assets/*.png
 
 # CUDA/editor cruft
 *.ptx
