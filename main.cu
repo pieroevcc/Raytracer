@@ -2,12 +2,9 @@
 #include <cuda_runtime.h>
 #include <curand_kernel.h>
 #include <fstream>
-#include <iostream>
-#include <algorithm>
 #include "vec3.h"
 #include "ray.h"
 #include "raytracer.cuh"
-
 
 int main(){
     float* fb = nullptr;
@@ -30,7 +27,6 @@ int main(){
 
     Camera cam = make_camera(width, height, Vector3(13,2,3), Vector3(0,0,0));
 
-
     dim3 initThreads(8, 8);
     dim3 initBlocks((width + 7) / 8, (height + 7) / 8);
     render_init<<<initBlocks, initThreads>>>(rs, width, height);
@@ -39,13 +35,10 @@ int main(){
     dim3 threads(TX, TY);
     dim3 blocks((width + TX - 1) / TX, (height + TY - 1) / TY);
 
-    
     render<<<blocks,threads>>>(fb, world, n, width, height, rs, cam, samples_per_pixel);
     
-
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) printf("CUDA error : %s\n", cudaGetErrorString(err));
-
 
     std::ofstream out("image.ppm");
     out << "P3\n" << width << " " << height << "\n255\n";
@@ -58,11 +51,9 @@ int main(){
             out << x << " " << y << " " << z << "\n";
         }
     }
-
     cudaFree(fb);
     cudaFree(actual);
     cudaFree(world);
     cudaFree(rs);
-
     return 0;
 }

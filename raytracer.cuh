@@ -19,8 +19,7 @@ struct Camera {
 
 __device__ Vector3 random_unit_vector(curandState* rs){
     while(true){
-        float rand = 2.0f*curand_uniform(rs) - 1.0f;
-        Vector3 p = Vector3(rand, rand, rand);
+        Vector3 p = Vector3(2.0f*curand_uniform(rs) - 1.0f, 2.0f*curand_uniform(rs) - 1.0f, 2.0f*curand_uniform(rs) - 1.0f);
         float lensq = length_squared(p);
         if (1e-30f < lensq && lensq <= 1.0f) return p /sqrtf(lensq);
     }
@@ -28,8 +27,7 @@ __device__ Vector3 random_unit_vector(curandState* rs){
 
 __device__ Vector3 random_in_unit_disk(curandState* rs) {
     while (true) {
-        float rand = 2.0f*curand_uniform(rs) - 1.0f;
-        Vector3 p = Vector3(rand, rand, 0.0f);
+        Vector3 p = Vector3(2.0f*curand_uniform(rs) - 1.0f, 2.0f*curand_uniform(rs) - 1.0f, 0.0f);
         if (length(p) < 1.0f) return p;
     }
 }
@@ -81,9 +79,7 @@ __device__ bool scatter(const Material& m, const Ray& r_in, const HitRecord& rec
                 scattered = Ray(rec.p, direction);
                 res = true;
                 break;
-            }   
-            default:
-                return res;       
+            }        
         }
         return res;
     }
@@ -209,7 +205,7 @@ __global__ void render (float* fb, const Sphere* world, int n, int width, int he
         float oy = curand_uniform(&local_rand) - 0.5f;
         Vector3 sample = cam.pixel00_loc + (i + ox) * cam.pixel_delta_u + (j + oy) * cam.pixel_delta_v;
         Ray r = Ray(ray_origin, sample - ray_origin);
-        pixel_color = pixel_color + ray_color(r, world, n, &local_rand, max_depth);;
+        pixel_color = pixel_color + ray_color(r, world, n, &local_rand, max_depth);
     }
     rs[pixel_index] = local_rand;
     pixel_color = pixel_color * 1.0f/spp;
