@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <cuda_runtime.h>
+#include <vector>
+#include "vec3.h"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <cuda_gl_interop.h>
@@ -33,36 +35,74 @@ bool update_camera(GLFWwindow* win, Vector3& lookfrom, Vector3& lookat){
     Vector3 fs = forward*speed;
     Vector3 rs = right*speed;
     if (glfwGetKey(win, GLFW_KEY_W) == GLFW_PRESS){
-        lookfrom = lookfrom + fs;
-        lookat = lookat + fs;
+        lookfrom += fs;
+        lookat += fs;
         moved = true;
     }
     if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS){
-        lookfrom = lookfrom + rs;
-        lookat = lookat + rs;
+        lookfrom += rs;
+        lookat += rs;
         moved = true;
     }
     if (glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS){
-        lookfrom = lookfrom - fs;
-        lookat = lookat - fs;
+        lookfrom -= fs;
+        lookat -= fs;
         moved = true;
     }
     if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS){
-        lookfrom = lookfrom - rs;
-        lookat = lookat - rs;
+        lookfrom -= rs;
+        lookat -= rs;
         moved = true;
     }
     if (glfwGetKey(win, GLFW_KEY_SPACE) == GLFW_PRESS){
-        lookfrom = lookfrom + Vector3(0,1,0)*speed;
-        lookat = lookat + Vector3(0,1,0)*speed;
+        lookfrom += Vector3(0,1,0)*speed;
+        lookat += Vector3(0,1,0)*speed;
         moved = true;
     }
     if (glfwGetKey(win, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS){
-        lookfrom = lookfrom - Vector3(0,1,0)*speed;
-        lookat = lookat - Vector3(0,1,0)*speed;
+        lookfrom -= Vector3(0,1,0)*speed;
+        lookat -= Vector3(0,1,0)*speed;
         moved = true;
     }
     return moved;
+}
+
+
+void reset_physics(Sphere* world, std::vector<Vector3>& vel, int n){
+    for(int k = 4; k < n; k++){
+        world[k].center.y = random_float(5,20);
+        vel[k] = Vector3(0,0,0);
+    }
+}
+
+void poll_physics_toggle(GLFWwindow* win, bool& physics_on, bool& g_was_down, Sphere* world, std::vector<Vector3>& vel, int n){
+    bool check_toggle = glfwGetKey(win, GLFW_KEY_G) == GLFW_PRESS;
+    if (check_toggle && !g_was_down){
+        physics_on = !physics_on;
+        if (physics_on) reset_physics(world, vel, n);
+    }
+    g_was_down = check_toggle;
+}
+
+bool step_physics(Sphere* world, std::vector<Vector3>& vel, int n, float dt){
+    bool res = false;
+    Vector3 g_dt = Vector3(0, -9.81f, 0) * dt;
+    float sq_g_dt = -g_dt.y * -g_dt.y;
+    for(int k = 4; k < n; k++){
+        vel[k] += g_dt;
+        world[k].center += vel[k] * dt;
+        if (world[k].center.y - world[k].radius <= 0){
+            world[k].center.y = world[k].radius;
+            vel[k].y = -vel[k].y * 0.6f;
+            if (fabsf(vel[k].y) < -g_dt.y){
+                vel[k].y = 0;
+            }
+        }
+        if (length_squared(vel[k]) >= sq_g_dt){
+            res = true;
+        }
+    }
+    return res;
 }
 
 int main(){
@@ -88,6 +128,14 @@ int main(){
     float ms_sum = 0;
     int frames = 0;
 
+    //physics
+    std::vector<Vector3> vel(n);
+    bool physics_on = false;
+    bool g_was_down = false;
+    bool scene_moving = false;
+    float dt;
+    double prev_time;
+
     cudaMallocManaged(&accum, 3*W*H*sizeof(float));
     cudaMemset(accum, 0, 3*W*H*sizeof(float));
     cudaMallocManaged(&actual, sizeof(int));
@@ -109,14 +157,21 @@ int main(){
    
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
+    prev_time = glfwGetTime();
 
     while(!glfwWindowShouldClose(d.window)){ //poll -> clear -> bind (program/vao/tex) -> draw -> swap
         glfwPollEvents();
-
+        poll_physics_toggle(d.window, physics_on, g_was_down, world, vel, n);
+        double now = glfwGetTime();
         bool moved = update_camera(d.window, lookfrom, lookat);
         cam = make_camera(W, H, lookfrom, lookat);
 
-        if (moved) {
+        dt = fminf(now - prev_time, 0.033f);
+        prev_time = now;
+
+        if (physics_on) scene_moving = step_physics(world, vel, n, dt);
+        else scene_moving = false;
+        if (moved || scene_moving) {
             count = 0;
             cudaMemset(accum, 0, 3*W*H*sizeof(float));
         }
