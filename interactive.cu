@@ -13,6 +13,7 @@ extern "C" {
     __declspec(dllexport) unsigned long NvOptimusEnablement = 0x00000001;
 }
 
+//convert drawn pixels to render in display
 __global__ void float_to_uchar4(uchar4* out, const float* fb, float* accum, int count, int W, int H){
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -27,6 +28,7 @@ __global__ void float_to_uchar4(uchar4* out, const float* fb, float* accum, int 
     out[y*W+x] = make_uchar4(r, g, b, 255);
 }
 
+//key binds
 bool update_camera(GLFWwindow* win, Vector3& lookfrom, Vector3& lookat){
     bool moved = false;
     Vector3 forward = unit(lookat - lookfrom);
@@ -67,7 +69,7 @@ bool update_camera(GLFWwindow* win, Vector3& lookfrom, Vector3& lookat){
     return moved;
 }
 
-
+//spawns spheres in the sky
 void reset_physics(Sphere* world, std::vector<Vector3>& vel, int n){
     for(int k = 4; k < n; k++){
         world[k].center.y = random_float(5,20);
@@ -75,15 +77,28 @@ void reset_physics(Sphere* world, std::vector<Vector3>& vel, int n){
     }
 }
 
-void poll_physics_toggle(GLFWwindow* win, bool& physics_on, bool& g_was_down, Sphere* world, std::vector<Vector3>& vel, int n){
-    bool check_toggle = glfwGetKey(win, GLFW_KEY_G) == GLFW_PRESS;
-    if (check_toggle && !g_was_down){
-        physics_on = !physics_on;
-        if (physics_on) reset_physics(world, vel, n);
+// sets spheres on the ground
+void rest_physics(Sphere* world, std::vector<Vector3>& vel, int n){
+    for(int k = 4; k < n; k++){
+        world[k].center.y = world[k].radius;
+        vel[k] = Vector3(0,0,0);
     }
-    g_was_down = check_toggle;
 }
 
+//toggle physcis
+bool poll_physics_toggle(GLFWwindow* win, bool& physics_on, bool& g_was_down, Sphere* world, std::vector<Vector3>& vel, int n){
+    bool check_toggle = glfwGetKey(win, GLFW_KEY_G) == GLFW_PRESS;
+    bool toggled = check_toggle && !g_was_down;
+    if (toggled){
+        physics_on = !physics_on;
+        if (physics_on) reset_physics(world, vel, n);
+        else rest_physics(world, vel, n);
+    }
+    g_was_down = check_toggle;
+    return toggled;
+}
+
+//physics math
 bool step_physics(Sphere* world, std::vector<Vector3>& vel, int n, float dt){
     bool res = false;
     Vector3 g_dt = Vector3(0, -9.81f, 0) * dt;
@@ -161,7 +176,7 @@ int main(){
 
     while(!glfwWindowShouldClose(d.window)){ //poll -> clear -> bind (program/vao/tex) -> draw -> swap
         glfwPollEvents();
-        poll_physics_toggle(d.window, physics_on, g_was_down, world, vel, n);
+        bool toggled = poll_physics_toggle(d.window, physics_on, g_was_down, world, vel, n);
         double now = glfwGetTime();
         bool moved = update_camera(d.window, lookfrom, lookat);
         cam = make_camera(W, H, lookfrom, lookat);
@@ -171,7 +186,7 @@ int main(){
 
         if (physics_on) scene_moving = step_physics(world, vel, n, dt);
         else scene_moving = false;
-        if (moved || scene_moving) {
+        if (moved || scene_moving || toggled) { //a toggle is a scene change in either direction
             count = 0;
             cudaMemset(accum, 0, 3*W*H*sizeof(float));
         }
@@ -201,7 +216,6 @@ int main(){
             snprintf(buf, sizeof(buf), "CUDA Ray Tracer | %.2f ms | %.0f fps", avg, 1000.0f/avg);
             glfwSetWindowTitle(d.window, buf);
         }
-    
         CUDA_CHECK(cudaGetLastError());
         present(d);
     }
